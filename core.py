@@ -13,6 +13,9 @@ Three releases of the system, switched live by the instructor:
 import sqlite3
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
 
 import joblib
 import pandas as pd
@@ -108,7 +111,7 @@ class Store:
             self.con.commit()
 
     def add(self, rec, ts=None):
-        ts = (ts or datetime.now()).isoformat(timespec="seconds")
+        ts = (ts or datetime.now(IST).replace(tzinfo=None)).isoformat(timespec="seconds")  # Indian time
         with self.lock:
             self.con.execute(
                 "INSERT INTO log (ts, version, attendance_raw, marks_raw, attendance, marks, status, prob, label, reason)"

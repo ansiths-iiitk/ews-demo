@@ -150,8 +150,8 @@ def live_panel():
         per_min = ok.set_index("ts").resample("1min")["label"].apply(
             lambda s: (s == "Needs review").mean() if len(s) else None).dropna()
         if len(per_min) > 1:
-            st.caption("Share flagged 'Needs review', minute by minute")
-            st.line_chart(per_min.rename("Flagged share"))
+            st.caption("Percent flagged 'Needs review', minute by minute")
+            st.line_chart((per_min * 100).round(0).rename("Flagged %"))
 
     st.subheader("Latest requests")
     show = df.tail(25).iloc[::-1].copy()
