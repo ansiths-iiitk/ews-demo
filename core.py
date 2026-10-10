@@ -138,6 +138,8 @@ def drift_report(log, training, minutes=10):
     different from what the model learned from?'
     """
     ok = log[log["status"] == "ok"]
+    # ignore impossible values that release v1.0 let through (e.g. marks of 1000)
+    ok = ok[ok["marks"].between(0, 100) & ok["attendance"].between(0, 100)]
     if minutes is not None and len(ok):
         ok = ok[ok["ts"] >= ok["ts"].max() - timedelta(minutes=minutes)]
     train_mean = training["marks"].mean()
