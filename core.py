@@ -9,6 +9,10 @@ Three releases of the system, switched live by the instructor:
         to a fraction (80% -> 0.8) before calling the model, but the model was
         trained on percentages. Nothing crashes; the answers are just wrong.
         Used to show monitoring and rollback.
+  v2.1  the fix done properly: the bug is gone, the user says whether the
+        marks are out of 20 or out of 100, the check uses that maximum, and
+        the marks are converted to the scale the model learned (out of 100).
+        The model file is unchanged.
 """
 import sqlite3
 import threading
@@ -24,7 +28,9 @@ VERSIONS = {
     "v1.0": "First release (no input checking)",
     "v1.1": "Input checking added",
     "v2.0": "New release (contains a bug)",
+    "v2.1": "Fixed release (marks out of 20 or 100)",
 }
+SCALES = (20, 100)
 DEFAULT_VERSION = "v1.0"
 THRESHOLD = 0.5
 LOW_MARK = 20  # a mark of 20 or below is rare in the training data
@@ -40,7 +46,7 @@ def load_training(path="training_data.csv"):
 
 
 # ---------------------------------------------------------------- checking
-def validate(attendance_raw, marks_raw):
+def validate(attendance_raw, marks_raw, marks_max=100):
     """Return (attendance, marks, problem). problem is None when inputs are fine."""
     a_txt, m_txt = str(attendance_raw).strip(), str(marks_raw).strip()
     if a_txt == "" or m_txt == "":
@@ -51,16 +57,35 @@ def validate(attendance_raw, marks_raw):
         return None, None, "Values must be numbers."
     if not 0 <= a <= 100:
         return None, None, f"Attendance must be between 0 and 100 (got {a:g})."
-    if not 0 <= m <= 100:
-        return None, None, f"Marks must be between 0 and 100 (got {m:g})."
+    if not 0 <= m <= marks_max:
+        return None, None, f"Marks must be between 0 and {marks_max} (got {m:g})."
     return a, m, None
 
 
 # ---------------------------------------------------------------- prediction
-def predict(model, version, attendance_raw, marks_raw):
-    """Run one request through the chosen release. Never raises."""
+def predict(model, version, attendance_raw, marks_raw, scale=None):
+    """Run one request through the chosen release. Never raises.
+
+    scale is used only by v2.1: 20 or 100, the maximum the marks are out of.
+    """
     out = {"version": version, "attendance_raw": str(attendance_raw), "marks_raw": str(marks_raw),
            "attendance": None, "marks": None, "status": "ok", "prob": None, "label": None, "reason": None}
+
+    if version == "v2.1":
+        if scale not in SCALES:
+            out.update(status="rejected", reason="Choose whether the marks are out of 20 or out of 100.")
+            return out
+        out["marks_raw"] = f"{str(marks_raw).strip()} /{scale}"
+        a, m, problem = validate(attendance_raw, marks_raw, marks_max=scale)
+        if problem:
+            out.update(status="rejected", reason=problem)
+            return out
+        m = m * 100 / scale  # convert to the scale the model learned
+        frame = pd.DataFrame([[a, m]], columns=["attendance", "marks"])
+        p = float(model.predict_proba(frame)[0, 1])
+        out.update(attendance=a, marks=m, prob=p,
+                   label="Needs review" if p >= THRESHOLD else "On track")
+        return out
 
     if version == "v1.0":
         # no checking: just try to turn the text into numbers
@@ -133,7 +158,7 @@ class Store:
 
 
 # ---------------------------------------------------------------- drift check
-def drift_report(log, training, minutes=10):
+def drift_report(log, training, last_n=20):
     """Compare recent marks with the marks the model was trained on.
 
     Deliberately simple so it can be explained in one sentence:
@@ -143,8 +168,7 @@ def drift_report(log, training, minutes=10):
     ok = log[log["status"] == "ok"]
     # ignore impossible values that release v1.0 let through (e.g. marks of 1000)
     ok = ok[ok["marks"].between(0, 100) & ok["attendance"].between(0, 100)]
-    if minutes is not None and len(ok):
-        ok = ok[ok["ts"] >= ok["ts"].max() - timedelta(minutes=minutes)]
+    ok = ok.tail(last_n)  # judge only the most recent accepted requests
     train_mean = training["marks"].mean()
     train_low = (training["marks"] <= LOW_MARK).mean()
     rep = {"n_recent": len(ok), "train_mean": train_mean, "train_low_share": train_low,

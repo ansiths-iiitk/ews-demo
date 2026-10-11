@@ -56,11 +56,14 @@ def participant_page():
     with st.form("check", clear_on_submit=False):
         attendance = st.text_input("Attendance (%)")
         marks = st.text_input("Internal marks")
+        scale = None
+        if store.get_version() == "v2.1":
+            scale = st.radio("Marks are out of", core.SCALES, index=None, horizontal=True)
         sent = st.form_submit_button("Predict", use_container_width=True)
 
     if sent:
         version = store.get_version()
-        rec = core.predict(model, version, attendance, marks)
+        rec = core.predict(model, version, attendance, marks, scale)
         store.add(rec)
 
         if rec["status"] == "ok":
@@ -122,7 +125,7 @@ def live_panel():
     c[3].metric("Flagged 'Needs review'", f"{(ok['label'] == 'Needs review').mean():.0%}" if len(ok) else "–")
 
     # drift check
-    rep = core.drift_report(df, training, minutes=10)
+    rep = core.drift_report(df, training, last_n=20)
     st.subheader("Are tonight's inputs like the training data?")
     if rep["drift"]:
         st.error("Possible drift. " + rep["message"])
